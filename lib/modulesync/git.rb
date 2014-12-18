@@ -28,12 +28,32 @@ module ModuleSync
       end
     end
 
-    def self.bump(repo, m)
-      m.bump!
-      puts "Bumped to version #{m.version}"
+    def self.update_changelog(repo, version, message, module_root)
+      changelog = "#{module_root}/CHANGELOG.md"
+      if File.exists?(changelog)
+        puts "Updating #{changelog} for version #{version}"
+        changes = File.readlines(changelog)
+        File.open(changelog, 'w') do |f|
+          date = Time.now.strftime("%Y-%m-%d")
+          f.puts "## #{date} - Release #{version}\n\n"
+          f.puts "#{message}\n\n"
+          # Add old lines again
+          f.puts changes
+        end
+        repo.add('CHANGELOG.md')
+      else
+        puts "No CHANGELOG.md file found, not updating."
+      end
+    end
+
+    def self.bump(repo, m, message, module_root, changelog=false)
+      new = m.bump!
+      puts "Bumped to version #{new}"
       repo.add('metadata.json')
-      repo.commit("Release version #{m.version}")
+      self.update_changelog(repo, new, message, module_root) if changelog
+      repo.commit("Release version #{new}")
       repo.push
+      new
     end
 
     def self.tag(repo, version, tag_pattern)
@@ -44,7 +64,7 @@ module ModuleSync
     end
 
     # Git add/rm, git commit, git push
-    def self.update(name, files, message, branch, bump=false, tag=false, tag_pattern=nil)
+    def self.update(name, files, message, branch, bump=false, changelog=false, tag=false, tag_pattern=nil)
       module_root = "#{PROJ_ROOT}/#{name}"
       repo = ::Git.open(module_root)
       repo.branch(branch).checkout
@@ -56,12 +76,12 @@ module ModuleSync
         end
       end
       begin
-        repo.commit(message)
-        repo.push
+        #repo.commit(message)
+        #repo.push
         # Only bump/tag if pushing didn't fail (i.e. there were changes)
         m = Blacksmith::Modulefile.new("#{module_root}/metadata.json")
-        self.bump(repo, m) if bump
-        self.tag(repo, m.version, tag_pattern) if tag
+        new = self.bump(repo, m, message, module_root, changelog) if bump
+        self.tag(repo, new, tag_pattern) if tag
       rescue ::Git::GitExecuteError => git_error
         if git_error.message.include? "nothing to commit, working directory clean"
           puts "There were no files to update in #{name}. Not committing."
